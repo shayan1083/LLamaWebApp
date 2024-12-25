@@ -25,38 +25,54 @@ const ChatInterface = () => {
         setMessages(prev => [...prev, userMessage]);
         setIsLoading(true);
 
+        const botMessage: Message = {
+            id: uuidv4(),
+            content: '',
+            sender: 'bot',
+            timestamp: new Date(),
+        };
+        setMessages(prev => [...prev, botMessage]);
+
         try {
-            const response = await fetch('http://127.0.0.1:8000/answerquestion', {
+            const response = await fetch('http://127.0.0.1:8000/generate_formatted', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ question: content }),
+                body: JSON.stringify({ 
+                    model: 'llama3:latest',
+                    prompt: content,
+                    stream: true
+                 }),
             });
 
             if (!response.ok) {
                 throw new Error('API request failed');
             }
 
-            const answer = await response.text();
+            const reader = response.body?.getReader();
+            const decoder = new TextDecoder();
 
-            const botMessage: Message = {
-                id: uuidv4(),
-                content: answer,
-                sender: 'bot',
-                timestamp: new Date(),
+            while (reader) {
+                const {value, done} = await reader.read();
+                if (done) break;
+    
+                const chunk = decoder.decode(value);
+
+
+                setMessages(prev => prev.map(msg => 
+                    msg.id === botMessage.id 
+                        ? {...msg, content: msg.content + chunk}
+                        : msg
+                ));
             }
-
-            setMessages(prev => [...prev, botMessage]);
         } catch (error) {
             console.error('Error sending message: ', error);
-            const errorMessage: Message = {
-                id: uuidv4(),
-                content: "Sorry, I couldn't process your message. Please try again.",
-                sender: 'bot',
-                timestamp: new Date(),
-              };
-              setMessages(prev => [...prev, errorMessage]);
+            setMessages(prev => prev.map(msg => 
+                msg.id === botMessage.id 
+                    ? {...msg, content: "Sorry, I couldn't process your message. Please try again."}
+                    : msg
+            ));
         } finally {
             setIsLoading(false);
         }
