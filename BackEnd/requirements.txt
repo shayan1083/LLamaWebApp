@@ -5,3 +5,4 @@ langchain-community
 langchain-ollama
 pydantic
 requests
+asyncio

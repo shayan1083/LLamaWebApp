@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import MessageList from './MessageList.tsx';
 
@@ -10,11 +10,18 @@ interface Message {
 }
 
 const ChatInterface = () => {
-    const [messages, setMessages] = useState<Message[]>([]);
-    const [inputValue, setInputValue] = useState('');
-    const [isLoading, setIsLoading] = useState(false);
+    // State Variables
+    const [messages, setMessages] = useState<Message[]>([]); // stores chat history
+    const [inputValue, setInputValue] = useState(''); // keeps track of user input in chatbox
+    const [isLoading, setIsLoading] = useState(false); // indicates if a response is being generated
 
+    // Server Sent Events Connection
+    // EventSource object which manages connection to the server for real time updates
+    const eventSourceRef = useRef<EventSource | null>(null);
+
+    // Function to send a message
     const sendMessage = async (content: string) => {
+        // Create a new user message object 
         const userMessage: Message = {
             id: uuidv4(),
             content,
@@ -22,69 +29,72 @@ const ChatInterface = () => {
             timestamp: new Date(),
         };
 
-        setMessages(prev => [...prev, userMessage]);
-        setIsLoading(true);
+        setMessages(prev => [...prev, userMessage]); // update the messages state with the users message
+        setIsLoading(true); // indicate that a response is being generated
 
+        // Create a placeholder for the bots response
         const botMessage: Message = {
             id: uuidv4(),
             content: '',
             sender: 'bot',
             timestamp: new Date(),
         };
-        setMessages(prev => [...prev, botMessage]);
+        setMessages(prev => [...prev, botMessage]); // add the bots response to the messages state
 
-        try {
-            const response = await fetch('http://127.0.0.1:8000/generate_formatted', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ 
-                    model: 'llama3:latest',
-                    prompt: content,
-                    stream: true
-                 }),
-            });
+        // Open a SSE connection to fetch the response from the server
+        const eventSource = new EventSource(`http://127.0.0.1:8000/generate_formatted?prompt=${encodeURIComponent(content)}`);
+        eventSourceRef.current = eventSource;
 
-            if (!response.ok) {
-                throw new Error('API request failed');
-            }
+        // Event handler for receiving server sent messages
+        eventSource.onmessage = (event) => {
+            console.log('on message')
+            try {
+                const data = JSON.parse(event.data); // parse the incoming data
 
-            const reader = response.body?.getReader();
-            const decoder = new TextDecoder();
-
-            while (reader) {
-                const {value, done} = await reader.read();
-                if (done) break;
-    
-                const chunk = decoder.decode(value);
-
-
-                setMessages(prev => prev.map(msg => 
-                    msg.id === botMessage.id 
-                        ? {...msg, content: msg.content + chunk}
+                // update the bots message content as chunks are received
+                setMessages(prev => prev.map(msg =>
+                    msg.id === botMessage.id
+                        ? {
+                            ...msg,
+                            content: msg.content + data.response
+                        }
                         : msg
                 ));
+
+                // Close the connection if the response is complete
+                if (data.response.includes("[DONE]") || data.done) {
+                    eventSource.close();
+                    setIsLoading(false);
+                }
+            } catch (error) {
+                console.error('Error parsing event data:', error);
             }
-        } catch (error) {
-            console.error('Error sending message: ', error);
-            setMessages(prev => prev.map(msg => 
-                msg.id === botMessage.id 
-                    ? {...msg, content: "Sorry, I couldn't process your message. Please try again."}
+        };
+
+        // Event handler for connection errors
+        eventSource.onerror = (error) => {
+            console.error('EventSource error:', error);
+            // Update the bots message to display an error message
+            setMessages(prev => prev.map(msg =>
+                msg.id === botMessage.id
+                    ? { ...msg, content: msg.content || "Error receiving message. Please try again." }
                     : msg
             ));
-        } finally {
+            // Close the connection and reset the loading state
+            eventSource.close();
             setIsLoading(false);
-        }
+        };
     };
-
+    // Function to handle form submission
     const handleSubmit = (e: React.FormEvent) => {
-        e.preventDefault();
+        e.preventDefault(); // prevent default form submission behavior
+        // Send the message if the input is not empty
         if (inputValue.trim()) {
             sendMessage(inputValue.trim());
             setInputValue('')
         }
     };
+
 
     return (
         <div className="flex flex-col h-screen max-w-4xl mx-auto p-4">
@@ -119,6 +129,8 @@ const ChatInterface = () => {
             </div>
         </div>
     );
+
+
 };
 
 export default ChatInterface;

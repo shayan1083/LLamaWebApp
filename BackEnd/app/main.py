@@ -4,14 +4,12 @@ from fastapi.responses import StreamingResponse
 import requests
 from pydantic import BaseModel
 import json
-from langchain_ollama import OllamaLLM
-
-
+import asyncio
 
 app = FastAPI()
 
 class GenerateRequest(BaseModel):
-    model: str
+    model: str = 'llama3:latest'
     prompt: str
     stream: bool = False
 
@@ -40,16 +38,21 @@ async def generate_full(request: GenerateRequest):
             raw_response += line.decode('utf-8') + '\n'
     return raw_response
 
-@app.post("/generate_formatted")
-async def generate_formatted(request: GenerateRequest):
+@app.get("/generate_formatted")
+async def generate_formatted(
+    prompt: str,
+    model: str = 'llama3:latest',
+    stream: bool = True
+):
+    print("generate function called")
     url = 'http://localhost:11434/api/generate'
     headers = {'Content-Type': 'application/json'}
     data = {
-        "model": request.model,
-        "prompt": request.prompt,
-        "stream": request.stream
+        "model": model,
+        "prompt": prompt,
+        "stream": stream
     }
-
+    
     async def response_stream():
         response = requests.post(url, headers=headers, json=data, stream=True)
         for line in response.iter_lines():
@@ -57,8 +60,11 @@ async def generate_formatted(request: GenerateRequest):
                 try:
                     json_line = json.loads(line.decode('utf-8'))
                     if "response" in json_line:
-                        print(f"Streaming chunk: {json_line['response']}")
-                        yield json_line["response"]
+                        response_data = json.dumps({
+                            "response": json_line["response"]
+                        })
+                        yield f'data: {response_data}\n\n'
+                        await asyncio.sleep(0.1)
                 except json.JSONDecodeError:
                     continue
     
