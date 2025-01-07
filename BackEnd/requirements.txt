@@ -6,3 +6,5 @@ langchain-ollama
 pydantic
 requests
 asyncio
+uuid
+PyPDF2
